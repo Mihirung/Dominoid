@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Dominoid: parametric 'musical domino' tiles for resin printing.
 
-Each tile is a solid 70 x 20 x 10 mm domino whose long face carries a
-five-line staff engraved edge to edge, with one note letter shown as
-crotchets in three octave positions (ledger lines included) and the
-letter itself as a heading at the top.
+Each tile is a solid portrait tile (20 mm wide, 70 mm high, 5 mm thick)
+whose face carries a five-line staff engraved edge to edge across the
+width, so tiles standing side by side chain into one continuous staff.
+One note letter is shown as crotchets in three octave positions, ledger
+lines included, reading low to high left to right, with the letter as a
+heading at the top.
 
 Engraved features (staff, heading) are recessed so they can be
 paint-filled black after printing; note glyphs (heads, stems, ledger
@@ -25,36 +27,40 @@ from pathlib import Path
 import numpy as np
 import trimesh
 from shapely.geometry import Polygon
+from shapely.ops import unary_union
 
 # ---------------------------------------------------------------- tile
-TILE_L = 70.0        # mm, long side (X)
-TILE_H = 20.0        # mm, face height (Y)
-TILE_T = 10.0        # mm, thickness (Z)
+TILE_W = 20.0        # mm, face width (X): tiles chain along this edge
+TILE_H = 70.0        # mm, face height (Y)
+TILE_T = 5.0         # mm, thickness (Z)
 CHAMFER = 0.6        # mm, chamfer on all edges
 
 # ------------------------------------------------------------ notation
-GAP = 1.8            # staff space (line-centre to line-centre)
-STAFF_Y = 10.0       # y of the middle staff line (face centred)
+GAP = 2.6            # staff space (line-centre to line-centre)
+STAFF_Y = 35.0       # y of the middle staff line
 STAFF_LINE_W = 0.35  # engraved staff line width
 ENGRAVE_D = 0.4      # engraving depth
 EMBOSS_H = 0.5       # emboss height above the face
 
-HEAD_A, HEAD_B = 1.15, 0.80   # notehead ellipse semi-axes
+HEAD_A = 0.64 * GAP           # notehead ellipse semi-axes
+HEAD_B = 0.445 * GAP
 HEAD_TILT = math.radians(20)  # anticlockwise tilt of the notehead
-STEM_W = 0.4                  # stem width
+STEM_W = 0.5                  # stem width
 STEM_LEN = 3.5 * GAP          # standard stem length: 3.5 spaces
-LEDGER_LEN = 3.6              # ledger line length, centred on the head
+STEM_MIN = 2.5 * GAP          # shortest a stem may be trimmed to
+LEDGER_LEN = 2.0 * GAP        # ledger line length, centred on the head
 LEDGER_W = 0.5                # ledger line width (thicker than staff)
+NOTE_SPREAD = 5.0             # x offset between octave columns
 
-HEADING_R_OUT = 1.8           # heading letter outer radius
-HEADING_STROKE = 0.75         # heading letter stroke width
-HEADING_Y = 17.3              # heading letter centre height
+HEADING_R_OUT = 4.5           # heading letter outer radius
+HEADING_STROKE = 1.5          # heading letter stroke width
+HEADING_Y = 58.0              # heading letter centre height
 
 # Diatonic index for staff-position arithmetic (E4 = bottom line = 0).
 _LETTERS = "CDEFGAB"
 
-# Octaves per letter chosen to fit the written clarinet range on the
-# 20 mm face (C gets middle C, third-space C and high C, as requested).
+# Octaves per letter, chosen around the written clarinet range (C gets
+# middle C, third-space C and high C, as requested).
 DEFAULT_OCTAVES = {
     "C": (4, 5, 6), "D": (4, 5, 6), "E": (4, 5, 6), "F": (4, 5, 6),
     "G": (3, 4, 5), "A": (3, 4, 5), "B": (3, 4, 5),
@@ -119,28 +125,17 @@ def chamfered_tile():
     c = CHAMFER
     parts = []
     for dx, dy, dz in ((c, c, 0), (c, 0, c), (0, c, c)):
-        b = trimesh.creation.box((TILE_L - 2 * dx, TILE_H - 2 * dy,
+        b = trimesh.creation.box((TILE_W - 2 * dx, TILE_H - 2 * dy,
                                   TILE_T - 2 * dz))
-        b.apply_translation([TILE_L / 2, TILE_H / 2, TILE_T / 2])
+        b.apply_translation([TILE_W / 2, TILE_H / 2, TILE_T / 2])
         parts.append(b)
     return trimesh.util.concatenate(parts).convex_hull
 
 
 # ----------------------------------------------------------- the glyphs
-def note_glyph_polys(cx, position):
-    """Notehead, stem and ledger lines for one crotchet, as 2D polys."""
+def head_and_ledgers(cx, position):
     cy = note_y(position)
     polys = [ellipse_poly(cx, cy, HEAD_A, HEAD_B, HEAD_TILT)]
-    # Horizontal half-extent of the tilted notehead, for stem placement.
-    half_w = math.hypot(HEAD_A * math.cos(HEAD_TILT),
-                        HEAD_B * math.sin(HEAD_TILT))
-    stem_up = position < 2  # below the middle line -> stem up
-    if stem_up:
-        polys.append(rect_poly(cx + half_w - STEM_W, cy,
-                               cx + half_w, cy + STEM_LEN))
-    else:
-        polys.append(rect_poly(cx - half_w, cy - STEM_LEN,
-                               cx - half_w + STEM_W, cy))
     for p in ledger_positions(position):
         ly = note_y(p)
         polys.append(rect_poly(cx - LEDGER_LEN / 2, ly - LEDGER_W / 2,
@@ -148,12 +143,40 @@ def note_glyph_polys(cx, position):
     return polys
 
 
+def stem_poly(cx, position, length):
+    cy = note_y(position)
+    half_w = math.hypot(HEAD_A * math.cos(HEAD_TILT),
+                        HEAD_B * math.sin(HEAD_TILT))
+    if position < 2:  # below the middle line -> stem up on the right
+        return rect_poly(cx + half_w - STEM_W, cy, cx + half_w, cy + length)
+    return rect_poly(cx - half_w, cy - length, cx - half_w + STEM_W, cy)
+
+
+def note_column_polys(xs, positions):
+    """All glyph polygons, with stems trimmed clear of neighbours."""
+    bodies = [head_and_ledgers(cx, pos) for cx, pos in zip(xs, positions)]
+    polys = []
+    for i, (cx, pos) in enumerate(zip(xs, positions)):
+        others = unary_union(
+            [p for j, body in enumerate(bodies) if j != i for p in body])
+        length = STEM_LEN
+        stem = stem_poly(cx, pos, length)
+        while stem.buffer(0.3).intersects(others) and length > STEM_MIN:
+            length -= 0.1
+            stem = stem_poly(cx, pos, length)
+        polys.extend(bodies[i])
+        polys.append(stem)
+    return polys
+
+
 def build_tile(letter, octaves):
     letter = letter.upper()
-    positions = [staff_position(letter, o) for o in octaves]
+    positions = sorted(staff_position(letter, o) for o in octaves)
+    xs = [TILE_W / 2 + (i - (len(positions) - 1) / 2) * NOTE_SPREAD
+          for i in range(len(positions))]
     for pos in positions:
-        y_top = note_y(pos) + max(HEAD_B, 0) + 0.1
-        if y_top > TILE_H - CHAMFER or note_y(pos) - HEAD_B < CHAMFER:
+        if (note_y(pos) + HEAD_B + STEM_LEN > TILE_H - CHAMFER
+                or note_y(pos) - HEAD_B - STEM_LEN < CHAMFER):
             raise ValueError(
                 f"{letter}{octaves}: note at staff position {pos} "
                 f"does not fit the {TILE_H} mm face")
@@ -168,24 +191,20 @@ def build_tile(letter, octaves):
     for k in range(-2, 3):
         y = STAFF_Y + k * GAP
         cuts.append(prism(rect_poly(-2, y - STAFF_LINE_W / 2,
-                                    TILE_L + 2, y + STAFF_LINE_W / 2),
+                                    TILE_W + 2, y + STAFF_LINE_W / 2),
                           z_face - ENGRAVE_D, z_face + 1))
-    cuts.append(prism(letter_c_poly(TILE_L / 2, HEADING_Y,
+    cuts.append(prism(letter_c_poly(TILE_W / 2, HEADING_Y,
                                     HEADING_R_OUT, HEADING_STROKE),
                       z_face - ENGRAVE_D, z_face + 1))
     tile = tile.difference(trimesh.util.concatenate(cuts), engine="manifold")
 
-    # Embossed crotchets, evenly spaced, ascending left to right.
-    xs = [TILE_L * (i + 1) / (len(positions) + 1)
-          for i in range(len(positions))]
-    raised = []
-    for cx, pos in zip(xs, sorted(positions)):
-        for poly in note_glyph_polys(cx, pos):
-            raised.append(prism(poly, z_face - 1, z_face + EMBOSS_H))
+    # Embossed crotchets, ascending left to right across the width.
+    raised = [prism(poly, z_face - 1, z_face + EMBOSS_H)
+              for poly in note_column_polys(xs, positions)]
     tile = tile.union(trimesh.util.concatenate(raised), engine="manifold")
 
     assert tile.is_watertight, "resulting mesh is not watertight"
-    return tile, xs, sorted(positions)
+    return tile, xs, positions
 
 
 # -------------------------------------------------------- design proof
@@ -193,50 +212,34 @@ def draw_proof(letter, xs, positions, path):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib.patches import Ellipse, Rectangle, Arc
+    from matplotlib.patches import Rectangle, Arc
 
-    fig, ax = plt.subplots(figsize=(11, 4.2))
-    ax.add_patch(Rectangle((0, 0), TILE_L, TILE_H, fill=False, lw=1.5,
+    fig, ax = plt.subplots(figsize=(4.6, 11))
+    ax.add_patch(Rectangle((0, 0), TILE_W, TILE_H, fill=False, lw=1.5,
                            ec="#888"))
     for k in range(-2, 3):
         y = STAFF_Y + k * GAP
-        ax.plot([0, TILE_L], [y, y], color="black", lw=1.6,
+        ax.plot([0, TILE_W], [y, y], color="black", lw=1.6,
                 solid_capstyle="butt")
-    ax.add_patch(Arc((TILE_L / 2, HEADING_Y),
-                     2 * HEADING_R_OUT - HEADING_STROKE,
-                     2 * HEADING_R_OUT - HEADING_STROKE,
-                     theta1=35, theta2=325, color="black",
-                     lw=3.4))
-    for cx, pos in zip(xs, positions):
-        cy = note_y(pos)
-        ax.add_patch(Ellipse((cx, cy), 2 * HEAD_A, 2 * HEAD_B,
-                             angle=math.degrees(HEAD_TILT), color="#1a4a8a"))
-        half_w = math.hypot(HEAD_A * math.cos(HEAD_TILT),
-                            HEAD_B * math.sin(HEAD_TILT))
-        if pos < 2:
-            ax.plot([cx + half_w - STEM_W / 2] * 2, [cy, cy + STEM_LEN],
-                    color="#1a4a8a", lw=1.8, solid_capstyle="butt")
-        else:
-            ax.plot([cx - half_w + STEM_W / 2] * 2, [cy - STEM_LEN, cy],
-                    color="#1a4a8a", lw=1.8, solid_capstyle="butt")
-        for p in ledger_positions(pos):
-            ly = note_y(p)
-            ax.plot([cx - LEDGER_LEN / 2, cx + LEDGER_LEN / 2], [ly, ly],
-                    color="#1a4a8a", lw=2.2, solid_capstyle="butt")
-    ax.set_xlim(-4, TILE_L + 4)
-    ax.set_ylim(-5.5, TILE_H + 3)
+    d = 2 * HEADING_R_OUT - HEADING_STROKE
+    ax.add_patch(Arc((TILE_W / 2, HEADING_Y), d, d, theta1=35, theta2=325,
+                     color="black", lw=7))
+    for poly in note_column_polys(xs, positions):
+        x, y = poly.exterior.xy
+        ax.fill(x, y, color="#1a4a8a", lw=0)
+    ax.set_xlim(-6, TILE_W + 6)
+    ax.set_ylim(-6, TILE_H + 4)
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.set_title(f"Dominoid '{letter}' — {TILE_L:g} × {TILE_H:g} × "
-                 f"{TILE_T:g} mm  |  black = engraved {ENGRAVE_D} mm "
-                 f"(paint-fill)  |  blue = embossed {EMBOSS_H} mm",
-                 fontsize=11)
-    ax.annotate("", xy=(TILE_L, -2.5), xytext=(0, -2.5),
+    ax.set_title(f"Dominoid '{letter}' — {TILE_W:g} × {TILE_H:g} × "
+                 f"{TILE_T:g} mm\nblack = engraved {ENGRAVE_D} mm (paint-"
+                 f"fill), blue = embossed {EMBOSS_H} mm", fontsize=10)
+    ax.annotate("", xy=(TILE_W, -3), xytext=(0, -3),
                 arrowprops=dict(arrowstyle="<->", color="#888"))
-    ax.text(TILE_L / 2, -4.6, f"{TILE_L:g} mm", ha="center", color="#555")
-    ax.annotate("", xy=(-2.5, TILE_H), xytext=(-2.5, 0),
+    ax.text(TILE_W / 2, -5.4, f"{TILE_W:g} mm", ha="center", color="#555")
+    ax.annotate("", xy=(-3, TILE_H), xytext=(-3, 0),
                 arrowprops=dict(arrowstyle="<->", color="#888"))
-    ax.text(-3.6, TILE_H / 2, f"{TILE_H:g} mm", va="center", ha="right",
+    ax.text(-4.4, TILE_H / 2, f"{TILE_H:g} mm", va="center", ha="right",
             rotation=90, color="#555")
     fig.savefig(path, dpi=160, bbox_inches="tight")
     plt.close(fig)
