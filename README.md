@@ -61,3 +61,54 @@ position, and refuses geometry that will not fit the face.
 
 Still to come for a full set: accidental tiles (sharp and flat glyphs), a
 display rack, and the per-note LEDs.
+
+## The scale automaton (`automaton/`)
+
+A second take on the same idea, as a mechanism: a panel with a staff,
+and a lever that sweeps a circle of fifths. Move the lever to a key and
+the eight noteheads of the major scale rise or fall to the right tonic
+while the key signature slides in one sharp or flat at a time.
+
+The trick that makes it simple: a major scale on the staff is always the
+same shape (eight noteheads on consecutive lines and spaces), so the
+whole scale can ride on one carriage. Only two things change with key:
+how high the carriage sits, and how many accidentals show. Three cam
+discs on the lever's shaft do the work:
+
+- **Tonic disc** (front): a groove whose radius encodes each key's tonic
+  height. A pin on the scale carriage rides in it, lifting the ladder by
+  0 to 15 mm (middle C up to B4) as the lever turns.
+- **Sharps disc** (middle): a spiral groove that advances 5 mm per key
+  clockwise from C and dwells anticlockwise. A pin on the *sharp comb*
+  (seven ♯ tabs hanging from a hidden spine) follows it, so F♯, C♯, G♯…
+  slide into the signature window from the right, one per step.
+- **Flats disc** (back): the mirror spiral driving the *flat comb*
+  (seven ♭ tabs rising from a hidden spine below).
+
+The grooves end at F♯ (six sharps) and D♭ (five flats), which is the
+mechanical stop: the lever travels 330° around the circle and the seam
+falls exactly where sharps become flats. Every follower is a 3 mm peg in
+a 3.4 mm groove, positive-drive in both directions, no springs.
+
+Front panel details: the staff lines cross the windows as physical bars
+(so the noteheads slide behind them, like ink on a line), each notehead
+has its own narrow column window, and three short ledger stubs sit where
+C4 and the high A/B need them.
+
+```
+cd automaton
+python3 proof.py 0 5 -3       # assembly drawing, front and x-ray, per key
+python3 build.py              # STL parts + SVG sheets into output/parts/
+```
+
+`build.py` writes: the three cam discs, carriage, sharp comb, flat comb,
+D-shaft, spacers, lever, and the two 180 × 200 mm sheets (front panel and
+base) as both STL and SVG. The mechanism parts all fit a small resin bed;
+the sheets are best laser-cut or hand-cut from 3 mm MDF or acrylic using
+the SVGs (red = cut, blue = engrave or glue guide). The layer stack and
+every dimension live in `geometry.py`.
+
+Ideas for a mark II: a second, four-position lever for major, natural,
+harmonic and melodic minor (it shifts the carriage down one space for
+the relative minor and flips a ♯/♮ flag by the seventh), and an LED
+under each notehead.
