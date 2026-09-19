@@ -14,33 +14,52 @@ Great for practising clarinet scales; LEDs per note may follow.
 
 ## The tiles
 
-Seven natural-note tiles, `output/dominoid_C.stl` through
-`dominoid_B.stl` (C D E F G A B) — portrait tiles, 20 mm wide × 70 mm
-high × 5 mm thick, millimetre units, 0.6 mm chamfered edges. Tiles stand
-side by side along the 20 mm edge, so an eight-note scale lines up in
-about 16 cm.
+A full set is **21 tiles**: seven letters, each as a natural, a sharp and
+a flat, in `output/` as both `.stl` and `.obj` (millimetre units) —
+`dominoid_C.stl`, `dominoid_C_sharp.stl`, `dominoid_C_flat.stl` and so
+on. Portrait tiles, 20 mm wide × 70 mm high × 5 mm thick, 0.6 mm
+chamfered edges. Tiles stand side by side along the 20 mm edge, so an
+eight-note scale lines up in about 16 cm.
+
+![The full set](output/dominoid_set.png)
 
 - **Engraved 0.4 mm deep** (recessed, for black paint-fill): the five
   staff lines, 0.35 mm wide, centred on the height and running edge to
   edge across the width so adjacent tiles carry one continuous staff;
-  the tile's own capital letter as a heading at the top, drawn from a
-  geometric A–G alphabet built into the generator.
+  the tile's name at the top — a capital from a geometric A–G alphabet,
+  followed by its accidental.
 - **Embossed 0.5 mm proud** (raised, tactile, dry-brush black): three
-  crotchets in treble clef, ascending left to right in columns 5 mm
-  apart. On the C tile those are middle C (C4, on one ledger line below
-  the staff, stem up), third-space C (C5, stem down) and high C (C6, on
-  the second ledger line above, both ledger lines shown, stem down);
-  the other tiles follow the same pattern in their own octaves. Stems
-  bridge over the staff grooves so the grooves stay clean for paint, and
-  are trimmed automatically if they would touch a neighbouring glyph.
+  crotchets in treble clef, ascending left to right in columns 4 mm
+  apart, each with its accidental in a slot to its left. On the C tile
+  those are middle C (C4, on one ledger line below the staff, stem up),
+  third-space C (C5, stem down) and high C (C6, on the second ledger
+  line above, both ledger lines shown, stem down); the other tiles
+  follow the same pattern in their own octaves. Stems bridge over the
+  staff grooves so the grooves stay clean for paint, and are trimmed
+  automatically if they would touch a neighbouring glyph.
+
+The accidental slot is reserved on every tile, naturals included, so all
+tiles carry their noteheads at the same x and a laid-out scale keeps an
+even spacing — exactly as the space before a note is reserved in
+engraved music.
 
 The octaves shown per letter sit around the written clarinet range:
 C, D, E and F carry octaves 4–6, and G, A and B carry 3–5, so every
 tile's three notes fit the 70 mm face with their ledger lines.
 
-![The seven tiles](output/dominoid_set.png)
+### What the set covers
 
-![Design proof](output/dominoid_C_face.png)
+Across all 48 scales a B♭ clarinettist reads — 12 major keys plus 12
+minor keys in natural, harmonic and melodic form — exactly **20 of the
+21 tiles get used**. The 21st, F♭, is only needed for C♭ major. Run
+`python3 tools/coverage.py` to check this from the scale spellings.
+
+One tile beyond the 21 completes the picture: **F double sharp**
+(`dominoid_F_double_sharp.stl`), the raised seventh of G♯ harmonic and
+melodic minor, and the only double accidental any of those 48 scales
+asks for. Double flats are supported by the generator but do not fit a
+20 mm tile beside three octaves of noteheads; no clarinet scale needs
+one, and the generator says so rather than producing a clipped tile.
 
 ## Printing and finishing
 
@@ -57,17 +76,19 @@ tile's three notes fit the 70 mm face with their ledger lines.
 
 ```
 pip install numpy scipy trimesh manifold3d shapely mapbox_earcut matplotlib
-python3 dominoid.py                # just the C tile
-python3 dominoid.py C D E F G A B  # the whole set
+python3 dominoid.py             # the whole 21-tile set
+python3 dominoid.py C F# Bb     # named tiles only
+python3 dominoid.py F##         # a double accidental
 ```
 
 `dominoid.py` is parametric: tile dimensions, staff gauge, engrave and
 emboss depths, and the octaves shown per letter are all constants at the
 top. It places ledger lines and stem directions automatically from staff
-position, and refuses geometry that will not fit the face.
+position, and refuses geometry that will not fit the face. Each run also
+writes a contact sheet of the tiles it built.
 
-Still to come for a full set: accidental tiles (sharp and flat glyphs), a
-display rack, and the per-note LEDs.
+Still to come: a display rack to stand the tiles in, and the per-note
+LEDs.
 
 ## The scale automaton (`automaton/`)
 

@@ -4,20 +4,24 @@
 Each tile is a solid portrait tile (20 mm wide, 70 mm high, 5 mm thick)
 whose face carries a five-line staff engraved edge to edge across the
 width, so tiles standing side by side chain into one continuous staff.
-One note letter is shown as crotchets in three octave positions, ledger
-lines included, reading low to high left to right, with the letter as a
-heading at the top.
+One note name is shown as crotchets in three octave positions, ledger
+lines and accidental included, reading low to high left to right, with
+the note name as a heading at the top.
+
+A full set is 21 tiles: seven letters, each as a natural, a sharp and a
+flat. That covers every key signature from seven flats to seven sharps,
+so any major, natural minor or harmonic minor scale can be laid out.
 
 Engraved features (staff, heading) are recessed so they can be
-paint-filled black after printing; note glyphs (heads, stems, ledger
-lines) are embossed so they can be felt and dry-brushed black.
+paint-filled black after printing; note glyphs (accidentals, heads,
+stems, ledger lines) are embossed so they can be felt and dry-brushed.
 
 Usage:
-    python3 dominoid.py            # generates the C prototype
-    python3 dominoid.py D E F      # generates other natural-note tiles
+    python3 dominoid.py                # the whole 21-tile set
+    python3 dominoid.py C F# Bb        # named tiles only
 
-Output: output/dominoid_<letter>.stl (mm units) and a 2D design proof
-output/dominoid_<letter>_face.png.
+Output: output/dominoid_<name>.stl (mm units) and a 2D design proof
+output/dominoid_<name>_face.png.
 """
 
 import math
@@ -26,6 +30,8 @@ from pathlib import Path
 
 import numpy as np
 import trimesh
+from shapely.affinity import rotate as shapely_rotate
+from shapely.affinity import scale as shapely_scale
 from shapely.affinity import translate
 from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
@@ -51,12 +57,18 @@ STEM_LEN = 3.5 * GAP          # standard stem length: 3.5 spaces
 STEM_MIN = 2.5 * GAP          # shortest a stem may be trimmed to
 LEDGER_LEN = 2.0 * GAP        # ledger line length, centred on the head
 LEDGER_W = 0.5                # ledger line width (thicker than staff)
-NOTE_SPREAD = 5.0             # x offset between octave columns
+
+NOTE_X = 11.0                 # x of the middle octave column
+NOTE_SPREAD = 4.0             # x offset between octave columns
+ACC_DX = -4.2                 # accidental centre, relative to its head
+ACC_STROKE = 0.45             # accidental stroke width
 
 HEADING_H = 9.0               # heading letter cap height
 HEADING_W = 7.0               # heading letter width
 HEADING_STROKE = 1.3          # heading letter stroke width
-HEADING_Y = 58.0              # heading letter centre height
+HEADING_Y = 61.0              # heading centre height
+HEADING_ACC_SCALE = 1.25      # accidental size in the heading
+HEADING_ACC_GAP = 0.8         # gap between heading letter and accidental
 
 # Diatonic index for staff-position arithmetic (E4 = bottom line = 0).
 _LETTERS = "CDEFGAB"
@@ -67,6 +79,14 @@ DEFAULT_OCTAVES = {
     "C": (4, 5, 6), "D": (4, 5, 6), "E": (4, 5, 6), "F": (4, 5, 6),
     "G": (3, 4, 5), "A": (3, 4, 5), "B": (3, 4, 5),
 }
+
+# An accidental never changes where the note sits on the staff, only
+# what it is called: C sharp shares middle C's line.
+ACCIDENTALS = ("", "#", "b")
+ACC_SUFFIX = {"": "", "#": "_sharp", "b": "_flat",
+              "##": "_double_sharp", "bb": "_double_flat"}
+ACC_SYMBOL = {"": "", "#": "♯", "b": "♭",
+              "##": "×", "bb": "♭♭"}
 
 
 def staff_position(letter, octave):
@@ -101,6 +121,10 @@ def ellipse_poly(cx, cy, a, b, tilt, n=96):
     return Polygon(np.c_[cx + x * ct - y * st, cy + x * st + y * ct])
 
 
+def rect_poly(x0, y0, x1, y1):
+    return Polygon([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
+
+
 def _bar(x0, x1, y, s):
     return rect_poly(x0, y - s / 2, x1, y + s / 2)
 
@@ -118,7 +142,8 @@ def _ring(cx, cy, rx, ry, s, t0=0.0, t1=360.0, n=96):
     return Polygon(np.r_[outer, inner])
 
 
-def letter_poly(letter, cx, cy, h=HEADING_H, w=HEADING_W, s=HEADING_STROKE):
+def letter_poly(letter, cx=0.0, cy=0.0, h=HEADING_H, w=HEADING_W,
+                s=HEADING_STROKE):
     """A geometric capital A-G: cap height h, width w, stroke s.
 
     Drawn from bars, stems and elliptical annulus sectors so the whole
@@ -165,8 +190,61 @@ def letter_poly(letter, cx, cy, h=HEADING_H, w=HEADING_W, s=HEADING_STROKE):
     return translate(glyph, cx, cy)
 
 
-def rect_poly(x0, y0, x1, y1):
-    return Polygon([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
+def sharp_poly(cx=0.0, cy=0.0, s=ACC_STROKE):
+    """A sharp sign, sized in staff spaces and centred on the notehead."""
+    parts = [_stem(x, -1.1 * GAP, 1.1 * GAP, s) for x in (-0.55, 0.55)]
+    for y in (-0.38 * GAP, 0.38 * GAP):
+        parts.append(shapely_rotate(_bar(-1.2, 1.2, y, s * 1.25), 12,
+                                    origin=(0, y)))
+    return translate(unary_union(parts).buffer(0), cx, cy)
+
+
+def flat_poly(cx=0.0, cy=0.0, s=ACC_STROKE):
+    """A flat sign: the bowl sits on the note, the stem rises above it."""
+    stem = rect_poly(-0.95, -0.50 * GAP, -0.95 + s, 1.50 * GAP)
+    bowl = ellipse_poly(0.05, -0.15, 1.10, 1.15, 0.0).difference(
+        ellipse_poly(-0.18, -0.20, 1.10 - s, 1.15 - s, 0.0))
+    bowl = bowl.intersection(rect_poly(-0.95, -3, 3, 3))
+    return translate(unary_union([stem, bowl]).buffer(0), cx, cy)
+
+
+def double_sharp_poly(cx=0.0, cy=0.0, s=ACC_STROKE):
+    """A double sharp: the engraver's X, drawn as two crossed bars."""
+    arm = 0.46 * GAP
+    parts = [shapely_rotate(rect_poly(-arm, -s * 0.7, arm, s * 0.7), a,
+                            origin=(0, 0)) for a in (45, -45)]
+    return translate(unary_union(parts).buffer(0), cx, cy)
+
+
+def double_flat_poly(cx=0.0, cy=0.0, s=ACC_STROKE):
+    """A double flat: two flat signs side by side."""
+    return translate(unary_union([flat_poly(-1.25, 0, s),
+                                  flat_poly(1.25, 0, s)]), cx, cy)
+
+
+ACC_POLY = {"#": sharp_poly, "b": flat_poly,
+            "##": double_sharp_poly, "bb": double_flat_poly}
+
+
+def accidental_poly(accidental, cx, cy, s=ACC_STROKE):
+    return ACC_POLY[accidental](cx, cy, s)
+
+
+def heading_poly(letter, accidental, cx, cy):
+    """The tile's name: capital letter, plus its accidental if any."""
+    glyph = letter_poly(letter)
+    if not accidental:
+        return translate(glyph, cx, cy)
+    acc = accidental_poly(accidental, 0, 0, ACC_STROKE * HEADING_ACC_SCALE)
+    acc = shapely_scale(acc, HEADING_ACC_SCALE, HEADING_ACC_SCALE,
+                        origin=(0, 0))
+    lx0, _, lx1, _ = glyph.bounds
+    ax0, ay0, ax1, ay1 = acc.bounds
+    total = (lx1 - lx0) + HEADING_ACC_GAP + (ax1 - ax0)
+    glyph = translate(glyph, -total / 2 - lx0, 0)
+    acc = translate(acc, -total / 2 + (lx1 - lx0) + HEADING_ACC_GAP - ax0,
+                    -(ay0 + ay1) / 2)
+    return translate(unary_union([glyph, acc]), cx, cy)
 
 
 # ------------------------------------------------------- 3D primitives
@@ -192,13 +270,22 @@ def chamfered_tile():
 
 
 # ----------------------------------------------------------- the glyphs
-def head_and_ledgers(cx, position):
+def note_body(cx, position, accidental):
+    """Everything that stays put: notehead, ledger lines, accidental.
+
+    The accidental slot is reserved on every tile, naturals included, so
+    all 21 tiles carry their noteheads at the same x and a laid-out
+    scale keeps an even spacing.
+    """
     cy = note_y(position)
     polys = [ellipse_poly(cx, cy, HEAD_A, HEAD_B, HEAD_TILT)]
     for p in ledger_positions(position):
         ly = note_y(p)
         polys.append(rect_poly(cx - LEDGER_LEN / 2, ly - LEDGER_W / 2,
                                cx + LEDGER_LEN / 2, ly + LEDGER_W / 2))
+    if accidental:
+        acc = accidental_poly(accidental, cx + ACC_DX, cy)
+        polys.extend(getattr(acc, "geoms", [acc]))
     return polys
 
 
@@ -211,9 +298,10 @@ def stem_poly(cx, position, length):
     return rect_poly(cx - half_w, cy - length, cx - half_w + STEM_W, cy)
 
 
-def note_column_polys(xs, positions):
+def note_column_polys(xs, positions, accidental=""):
     """All glyph polygons, with stems trimmed clear of neighbours."""
-    bodies = [head_and_ledgers(cx, pos) for cx, pos in zip(xs, positions)]
+    bodies = [note_body(cx, pos, accidental)
+              for cx, pos in zip(xs, positions)]
     polys = []
     for i, (cx, pos) in enumerate(zip(xs, positions)):
         others = unary_union(
@@ -228,93 +316,163 @@ def note_column_polys(xs, positions):
     return polys
 
 
-def build_tile(letter, octaves):
+def column_xs(n):
+    return [NOTE_X + (i - (n - 1) / 2) * NOTE_SPREAD for i in range(n)]
+
+
+def build_tile(letter, accidental="", octaves=None):
     letter = letter.upper()
+    octaves = octaves or DEFAULT_OCTAVES[letter]
     positions = sorted(staff_position(letter, o) for o in octaves)
-    xs = [TILE_W / 2 + (i - (len(positions) - 1) / 2) * NOTE_SPREAD
-          for i in range(len(positions))]
-    for pos in positions:
-        if (note_y(pos) + HEAD_B + STEM_LEN > TILE_H - CHAMFER
-                or note_y(pos) - HEAD_B - STEM_LEN < CHAMFER):
-            raise ValueError(
-                f"{letter}{octaves}: note at staff position {pos} "
-                f"does not fit the {TILE_H} mm face")
+    xs = column_xs(len(positions))
+
+    raised = unary_union(note_column_polys(xs, positions, accidental))
+    head = heading_poly(letter, accidental, TILE_W / 2, HEADING_Y)
+
+    # Nothing may run off the face or collide with the heading.
+    name = letter + accidental
+    margin = CHAMFER + 0.1
+    x0, y0, x1, y1 = unary_union([raised, head]).bounds
+    if x0 < margin or y0 < margin or x1 > TILE_W - margin \
+            or y1 > TILE_H - margin:
+        raise ValueError(
+            f"{name}: artwork runs off the face "
+            f"(x {x0:.1f}..{x1:.1f}, y {y0:.1f}..{y1:.1f})")
+    if raised.intersects(head.buffer(0.5)):
+        raise ValueError(f"{name}: notes collide with the heading")
 
     tile = chamfered_tile()
     z_face = TILE_T
 
     # Engravings: 5 staff lines edge to edge (through the chamfers) and
-    # the heading letter. Cut before embossing so raised glyphs bridge
-    # the grooves intact.
+    # the heading. Cut before embossing so raised glyphs bridge the
+    # grooves intact.
     cuts = [rect_poly(-2, STAFF_Y + k * GAP - STAFF_LINE_W / 2,
                       TILE_W + 2, STAFF_Y + k * GAP + STAFF_LINE_W / 2)
             for k in range(-2, 3)]
-    cuts.append(letter_poly(letter, TILE_W / 2, HEADING_Y))
+    cuts.append(head)
     tile = tile.difference(prism(unary_union(cuts), z_face - ENGRAVE_D,
                                  z_face + 1), engine="manifold")
 
     # Embossed crotchets, ascending left to right across the width. The
     # glyphs are merged in 2D before extruding: unioning overlapping
     # prisms instead leaves ramp slivers where their walls intersect.
-    raised = unary_union(note_column_polys(xs, positions))
     tile = tile.union(prism(raised, z_face - 1, z_face + EMBOSS_H),
                       engine="manifold")
 
-    assert tile.is_watertight, "resulting mesh is not watertight"
+    if not tile.is_volume:
+        raise ValueError(f"{name}: resulting mesh is not a printable solid")
     return tile, xs, positions
 
 
 # -------------------------------------------------------- design proof
-def draw_proof(letter, xs, positions, path):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+def draw_tile(ax, letter, accidental, xs, positions, label=True):
     from matplotlib.patches import Rectangle
 
-    fig, ax = plt.subplots(figsize=(4.6, 11))
-    ax.add_patch(Rectangle((0, 0), TILE_W, TILE_H, fill=False, lw=1.5,
+    ax.add_patch(Rectangle((0, 0), TILE_W, TILE_H, fill=False, lw=1.2,
                            ec="#888"))
     for k in range(-2, 3):
         y = STAFF_Y + k * GAP
-        ax.plot([0, TILE_W], [y, y], color="black", lw=1.6,
+        ax.plot([0, TILE_W], [y, y], color="black", lw=1.2,
                 solid_capstyle="butt")
-    head = letter_poly(letter, TILE_W / 2, HEADING_Y)
+    head = heading_poly(letter, accidental, TILE_W / 2, HEADING_Y)
     for g in getattr(head, "geoms", [head]):
         ax.fill(*g.exterior.xy, color="black", lw=0)
-    for poly in note_column_polys(xs, positions):
-        x, y = poly.exterior.xy
-        ax.fill(x, y, color="#1a4a8a", lw=0)
-    ax.set_xlim(-6, TILE_W + 6)
-    ax.set_ylim(-6, TILE_H + 4)
+        for ring in g.interiors:
+            ax.fill(*ring.xy, color="white", lw=0)
+    for poly in note_column_polys(xs, positions, accidental):
+        ax.fill(*poly.exterior.xy, color="#1a4a8a", lw=0)
+        for ring in poly.interiors:
+            ax.fill(*ring.xy, color="white", lw=0)
+    ax.set_xlim(-1, TILE_W + 1)
+    ax.set_ylim(-1, TILE_H + 1)
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.set_title(f"Dominoid '{letter}' — {TILE_W:g} × {TILE_H:g} × "
-                 f"{TILE_T:g} mm\nblack = engraved {ENGRAVE_D} mm (paint-"
-                 f"fill), blue = embossed {EMBOSS_H} mm", fontsize=10)
-    ax.annotate("", xy=(TILE_W, -3), xytext=(0, -3),
-                arrowprops=dict(arrowstyle="<->", color="#888"))
-    ax.text(TILE_W / 2, -5.4, f"{TILE_W:g} mm", ha="center", color="#555")
-    ax.annotate("", xy=(-3, TILE_H), xytext=(-3, 0),
-                arrowprops=dict(arrowstyle="<->", color="#888"))
-    ax.text(-4.4, TILE_H / 2, f"{TILE_H:g} mm", va="center", ha="right",
-            rotation=90, color="#555")
+    if label:
+        ax.set_title(letter + ACC_SYMBOL[accidental], fontsize=12)
+
+
+def draw_proof(letter, accidental, xs, positions, path):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(3.4, 10))
+    draw_tile(ax, letter, accidental, xs, positions, label=False)
+    ax.set_title(f"Dominoid '{letter}{ACC_SYMBOL[accidental]}' — "
+                 f"{TILE_W:g} x {TILE_H:g} x {TILE_T:g} mm\n"
+                 f"black = engraved {ENGRAVE_D} mm (paint-fill), "
+                 f"blue = embossed {EMBOSS_H} mm", fontsize=9)
     fig.savefig(path, dpi=160, bbox_inches="tight")
     plt.close(fig)
 
 
+def draw_set(tiles, path):
+    """One contact sheet of every tile built this run."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    n = len(tiles)
+    fig, axes = plt.subplots(1, n, figsize=(1.55 * n, 8.4))
+    for ax, (letter, accidental, xs, positions) in zip(
+            np.atleast_1d(axes), tiles):
+        draw_tile(ax, letter, accidental, xs, positions)
+    fig.suptitle("Dominoid — the full set of note tiles "
+                 f"({TILE_W:g} x {TILE_H:g} x {TILE_T:g} mm each)",
+                 fontsize=12)
+    fig.tight_layout()
+    fig.savefig(path, dpi=110, bbox_inches="tight")
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------- CLI
+def parse_name(token):
+    """'C', 'F#', 'Bb', 'Fs', 'E-flat' -> (letter, accidental)."""
+    t = token.strip().replace("-", "").replace("_", "")
+    letter = t[:1].upper()
+    if letter not in _LETTERS:
+        raise ValueError(f"{token!r}: not a note letter A-G")
+    rest = t[1:].lower().replace("♯", "#").replace("♭", "b")
+    if rest in ("", "nat", "natural"):
+        return letter, ""
+    if rest in ("#", "s", "sharp"):
+        return letter, "#"
+    if rest in ("b", "f", "flat"):
+        return letter, "b"
+    if rest in ("##", "x", "ss", "doublesharp"):
+        return letter, "##"
+    if rest in ("bb", "ff", "doubleflat"):
+        return letter, "bb"
+    raise ValueError(f"{token!r}: accidental must be sharp, flat, "
+                     f"double sharp, double flat or none")
+
+
+def full_set():
+    return [(letter, acc) for acc in ACCIDENTALS for letter in _LETTERS]
+
+
 def main(argv):
-    letters = [a.upper() for a in argv] or ["C"]
+    names = [parse_name(a) for a in argv] if argv else full_set()
     out = Path(__file__).parent / "output"
     out.mkdir(exist_ok=True)
-    for letter in letters:
+    built = []
+    for letter, accidental in names:
         octaves = DEFAULT_OCTAVES[letter]
-        tile, xs, positions = build_tile(letter, octaves)
-        stl = out / f"dominoid_{letter}.stl"
-        tile.export(stl)
-        draw_proof(letter, xs, positions, out / f"dominoid_{letter}_face.png")
-        names = ", ".join(f"{letter}{o}" for o in octaves)
-        print(f"{stl}  ({names}; {len(tile.faces)} triangles; "
-              f"volume {tile.volume / 1000:.1f} cm^3)")
+        tile, xs, positions = build_tile(letter, accidental, octaves)
+        stem = f"dominoid_{letter}{ACC_SUFFIX[accidental]}"
+        tile.export(out / f"{stem}.stl")
+        tile.export(out / f"{stem}.obj")
+        draw_proof(letter, accidental, xs, positions,
+                   out / f"{stem}_face.png")
+        built.append((letter, accidental, xs, positions))
+        spelt = ", ".join(f"{letter}{ACC_SYMBOL[accidental]}{o}"
+                          for o in octaves)
+        print(f"{stem}.stl/.obj  ({spelt}; {len(tile.faces)} triangles; "
+              f"{tile.volume / 1000:.1f} cm^3)")
+    if len(built) > 1:
+        draw_set(built, out / "dominoid_set.png")
+        print(f"\n{len(built)} tiles -> {out}")
 
 
 if __name__ == "__main__":
