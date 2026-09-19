@@ -12,33 +12,40 @@ appears as written notation — building it yourself teaches the sharps,
 flats, scale degrees and raised sevenths far better than reading a chart.
 Great for practising clarinet scales; LEDs per note may follow.
 
-## The C prototype
+## The tiles
 
-`output/dominoid_C.stl` — portrait tile, 20 mm wide × 70 mm high ×
-5 mm thick, millimetre units, 0.6 mm chamfered edges. Tiles stand side
-by side along the 20 mm edge, so an eight-note scale lines up in about
-16 cm.
+Seven natural-note tiles, `output/dominoid_C.stl` through
+`dominoid_B.stl` (C D E F G A B) — portrait tiles, 20 mm wide × 70 mm
+high × 5 mm thick, millimetre units, 0.6 mm chamfered edges. Tiles stand
+side by side along the 20 mm edge, so an eight-note scale lines up in
+about 16 cm.
 
 - **Engraved 0.4 mm deep** (recessed, for black paint-fill): the five
   staff lines, 0.35 mm wide, centred on the height and running edge to
   edge across the width so adjacent tiles carry one continuous staff;
-  the capital C heading at the top.
+  the tile's own capital letter as a heading at the top, drawn from a
+  geometric A–G alphabet built into the generator.
 - **Embossed 0.5 mm proud** (raised, tactile, dry-brush black): three
-  crotchets for C in treble clef, ascending left to right in columns
-  5 mm apart — middle C (C4, on one ledger line below the staff, stem
-  up), third-space C (C5, stem down) and high C (C6, on the second
-  ledger line above, both ledger lines shown, stem down). Stems bridge
-  over the staff grooves so the grooves stay clean for paint, and are
-  trimmed automatically if they would touch a neighbouring glyph.
+  crotchets in treble clef, ascending left to right in columns 5 mm
+  apart. On the C tile those are middle C (C4, on one ledger line below
+  the staff, stem up), third-space C (C5, stem down) and high C (C6, on
+  the second ledger line above, both ledger lines shown, stem down);
+  the other tiles follow the same pattern in their own octaves. Stems
+  bridge over the staff grooves so the grooves stay clean for paint, and
+  are trimmed automatically if they would touch a neighbouring glyph.
+
+The octaves shown per letter sit around the written clarinet range:
+C, D, E and F carry octaves 4–6, and G, A and B carry 3–5, so every
+tile's three notes fit the 70 mm face with their ledger lines.
+
+![The seven tiles](output/dominoid_set.png)
 
 ![Design proof](output/dominoid_C_face.png)
-
-![Heightmap of the STL](output/dominoid_C_render.png)
 
 ## Printing and finishing
 
 - White resin, 0.05 mm layers or finer. Each tile uses about 7 cm³
-  (roughly 8 g) of resin.
+  (roughly 8 g) of resin, so the set of seven is under 60 g.
 - Print with the decorated face up, tilted 15–25° with light supports on
   the back face, so the engraving and emboss stay crisp and free of
   suction marks.
@@ -50,8 +57,8 @@ by side along the 20 mm edge, so an eight-note scale lines up in about
 
 ```
 pip install numpy scipy trimesh manifold3d shapely mapbox_earcut matplotlib
-python3 dominoid.py          # the C prototype
-python3 dominoid.py D E F    # any natural notes, one tile each
+python3 dominoid.py                # just the C tile
+python3 dominoid.py C D E F G A B  # the whole set
 ```
 
 `dominoid.py` is parametric: tile dimensions, staff gauge, engrave and
